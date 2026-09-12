@@ -1,0 +1,6 @@
+node_modules/
+coverage/
+reports/
+test-results/
+test_data/
+package-lock.json
