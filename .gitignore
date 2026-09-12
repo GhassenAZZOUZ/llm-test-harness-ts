@@ -1,0 +1,8 @@
+node_modules/
+coverage/
+test-results/
+.env
+.npm/
+reports/*
+!reports/.gitkeep
+!reports/sample/
