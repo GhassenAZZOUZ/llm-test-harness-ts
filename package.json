@@ -1,0 +1,49 @@
+{
+  "name": "llm-test-harness",
+  "version": "0.1.0",
+  "description": "LLM testing & evaluation framework on Playwright Test: YAML test cases, deterministic + heuristic + LLM-as-judge evaluators, metrics, reports and a CI quality gate.",
+  "license": "MIT",
+  "author": "Ghassen Azouz",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20.19"
+  },
+  "bin": {
+    "llm-harness": "./bin/llm-harness.js"
+  },
+  "scripts": {
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write . && eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "validate": "tsx src/cli.ts validate",
+    "test:unit": "vitest run --coverage",
+    "test:llm": "playwright test",
+    "test": "npm run lint && npm run typecheck && npm run validate && npm run test:unit && npm run test:llm",
+    "demo:regression": "cross-env LLM_MOCK_RESPONSES=test_data/mock/responses.yaml,test_data/mock/faulty.yaml tsx src/cli.ts run || echo Expected: the quality gate rejected the regressed model",
+    "report": "playwright show-report reports/playwright",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "nunjucks": "^3.2.4",
+    "tsx": "^4.23.15",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^20.19.43",
+    "@types/nunjucks": "^3.2.6",
+    "@vitest/coverage-v8": "^4.1.11",
+    "cross-env": "^10.1.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-playwright": "^2.12.0",
+    "prettier": "^3.9.9",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^4.1.11"
+  }
+}
