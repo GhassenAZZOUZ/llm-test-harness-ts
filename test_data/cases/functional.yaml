@@ -1,0 +1,42 @@
+# Functional tests: does the model do the job on normal, well-formed requests?
+# Prefer deterministic assertions (exact / contains / regex / json_schema / length).
+
+- id: FUN-001
+  category: functional
+  title: Factual question - capital city
+  prompt: "What is the capital of France? Answer in one sentence."
+  expected:
+    contains: ["Paris"]
+    length: { max_words: 30 }
+  tags: [factual, smoke]
+  severity: critical
+
+- id: FUN-002
+  category: functional
+  title: Arithmetic with strict output format
+  description: Exact match is possible because the output format is fully specified.
+  prompt: "What is 12 multiplied by 12? Reply with the number only."
+  expected:
+    exact: "144"
+  tags: [factual, smoke, deterministic-format]
+
+- id: FUN-003
+  category: functional
+  title: Summarization stays short, relevant and grounded
+  template: summarize.njk
+  variables: { max_words: 50 }
+  context: >-
+    Starting in January, the company will allow employees to work remotely up to three days
+    per week. Teams must agree on two shared office days to keep collaboration strong.
+    Managers will review the policy after six months based on productivity data and an
+    employee survey. Employees who need special equipment at home can request a budget
+    of 300 euros from the IT department.
+  expected:
+    contains_any: ["remote", "remotely"]
+    length: { max_words: 50 }
+    relevant_to: >-
+      Employees may work remotely three days per week with two shared office days; the
+      policy is reviewed after six months and an equipment budget is available.
+    grounded: true
+  tags: [summarization, rag]
+
