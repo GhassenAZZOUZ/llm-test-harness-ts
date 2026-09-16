@@ -40,3 +40,46 @@
     grounded: true
   tags: [summarization, rag]
 
+- id: FUN-004
+  category: functional
+  title: Sentiment classification with a closed label set
+  prompt: >-
+    Classify the sentiment of this review as positive, negative or neutral. Reply with one
+    word only.
+
+    Review: "The delivery was two weeks late and the box arrived damaged. Never again."
+  expected:
+    regex: '^\s*negative\.?\s*$'
+  tags: [classification, smoke]
+
+- id: FUN-005
+  category: functional
+  title: Structured JSON extraction validated by JSON Schema
+  prompt: >-
+    Extract the person described below as JSON with the keys name, role, company and
+    years_experience (integer). Return JSON only.
+
+    Text: "Amira Haddad has been a Site Reliability Engineer at Nordwind Logistics for 7 years."
+  expected:
+    json_schema: person.schema.json
+    contains: ["Amira Haddad", "Nordwind Logistics"]
+  tags: [structured-output, json]
+  severity: critical
+
+- id: FUN-006
+  category: functional
+  title: Explanation quality assessed by LLM-as-a-judge
+  description: >-
+    Clarity for a junior audience cannot be expressed as a rule, so a judge is used - but it
+    is combined with cheap deterministic guards (keyword + length).
+  prompt: "Explain what a unit test is to a junior developer in 2-3 sentences."
+  expected:
+    contains_any: ["function", "unit", "code"]
+    length: { max_words: 90 }
+    judge:
+      rubric: >-
+        The answer correctly explains that a unit test checks a small, isolated piece of code
+        automatically, is understandable by a junior developer, and is 2-3 sentences long.
+      threshold: 0.7
+  tags: [explanation, llm-judge]
+  severity: minor

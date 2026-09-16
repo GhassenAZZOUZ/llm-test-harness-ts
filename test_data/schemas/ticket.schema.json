@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SupportTicketTriage",
+  "type": "object",
+  "required": ["priority", "category", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "priority": { "enum": ["low", "medium", "high", "critical"] },
+    "category": { "enum": ["billing", "technical", "account", "other"] },
+    "summary": { "type": "string", "maxLength": 120 }
+  }
+}

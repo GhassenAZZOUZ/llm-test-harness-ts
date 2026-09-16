@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExtractedPerson",
+  "type": "object",
+  "required": ["name", "role", "company", "years_experience"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "type": "string", "minLength": 1 },
+    "company": { "type": "string", "minLength": 1 },
+    "years_experience": { "type": "integer", "minimum": 0, "maximum": 70 }
+  }
+}
