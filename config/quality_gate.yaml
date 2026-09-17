@@ -1,0 +1,8 @@
+# Release criteria evaluated after every run (see src/metrics/gate.ts).
+# CI fails when any check is violated.
+min_pass_rate: 0.90 # share of executed cases that passed
+max_regression_failures: 0 # a fixed defect must never come back
+min_hallucination_detection_rate: 0.80 # share of hallucination probes handled correctly
+max_error_rate: 0.05 # provider/infrastructure errors
+max_p95_latency_ms: 15000 # generous: real APIs vary a lot
+max_total_cost_usd: 1.00 # budget guard for one full run
