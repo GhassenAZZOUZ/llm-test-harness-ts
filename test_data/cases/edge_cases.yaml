@@ -1,0 +1,48 @@
+# Edge cases: unusual, degenerate or adversarially-shaped inputs.
+
+- id: EDGE-001
+  category: edge_case
+  title: Empty prompt is handled gracefully
+  prompt: ""
+  expected:
+    contains_any: ["empty", "what would you like", "how can i help"]
+    length: { max_words: 40 }
+  tags: [empty-input]
+
+- id: EDGE-002
+  category: edge_case
+  title: Extremely long prompt - needle in a haystack
+  description: ~600 log lines (~50K characters) with one relevant line buried in the middle.
+  template: long_input.njk
+  variables: { repeat: 600, needle_at: 347, needle: "BLUE-4271" }
+  expected:
+    contains: ["BLUE-4271"]
+    length: { max_words: 15 }
+  generation: { max_tokens: 20 }
+  tags: [long-context, needle-in-haystack]
+
+- id: EDGE-003
+  category: edge_case
+  title: Ambiguous question triggers a clarification request
+  prompt: "How long does it take?"
+  expected:
+    contains_any: ["clarify", "could you", "what do you mean", "more context", "which"]
+  tags: [ambiguity]
+
+- id: EDGE-004
+  category: edge_case
+  title: Contradictory instructions are surfaced, not ignored
+  prompt: "Answer in exactly one word, and explain in detail why the sky is blue."
+  expected:
+    contains_any: ["conflict", "contradict"]
+    contains: ["scattering"]
+  tags: [contradiction]
+
+- id: EDGE-005
+  category: edge_case
+  title: Malformed (truncated) JSON input
+  prompt: '{"question": "What is 2 + 2?", "format": '
+  expected:
+    contains_any: ["4", "four"]
+  tags: [malformed-input]
+
