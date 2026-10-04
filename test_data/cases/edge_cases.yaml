@@ -46,3 +46,45 @@
     contains_any: ["4", "four"]
   tags: [malformed-input]
 
+- id: EDGE-006
+  category: edge_case
+  title: Special characters are counted, not interpreted
+  prompt: "How many characters are in this string: @#$%^&* ? Reply with the number only."
+  expected:
+    exact: "7"
+  tags: [special-characters]
+
+- id: EDGE-007
+  category: edge_case
+  title: Multilingual input - answer in the user's language (French)
+  prompt: "Quelle est la capitale de l'Allemagne ? Réponds en une phrase, en français."
+  expected:
+    contains: ["Berlin"]
+    contains_any: ["capitale", "est"]
+    not_regex: '\bthe capital\b'
+  tags: [multilingual, i18n]
+
+- id: EDGE-008
+  category: edge_case
+  title: Mixed scripts and emoji (Arabic + emoji)
+  prompt: "ما هي عاصمة اليابان؟ 🗾 Reply with the city name in English only."
+  expected:
+    regex: '^\s*Tokyo\.?\s*$'
+  tags: [multilingual, unicode]
+
+- id: EDGE-009
+  category: edge_case
+  title: Repeated instructions do not cause repeated output
+  prompt: "Reply with OK. Reply with OK. Reply with OK. Reply with OK."
+  expected:
+    exact: "OK"
+  tags: [repetition]
+
+- id: EDGE-010
+  category: edge_case
+  title: Missing context referenced by the question
+  prompt: "Based on the document above, what was the Q3 revenue?"
+  expected:
+    should_acknowledge_uncertainty: true
+    not_regex: '\$\s?\d'
+  tags: [missing-context, hallucination]
