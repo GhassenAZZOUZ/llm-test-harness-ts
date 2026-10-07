@@ -1,0 +1,8 @@
+.git
+node_modules
+coverage
+test-results
+reports/*
+!reports/.gitkeep
+.env
+.npm

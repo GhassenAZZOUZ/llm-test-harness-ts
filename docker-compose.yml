@@ -1,0 +1,41 @@
+# docker compose run --build --rm tests     -> full suite in mock mode (no API key)
+# docker compose run --rm demo-regression   -> regressed model, the quality gate must FAIL
+# docker compose run --rm evals-live        -> LLM evals against a real provider (.env)
+# docker compose --profile local up -d ollama, then LLM_BASE_URL=http://ollama:11434/v1
+
+x-harness: &harness
+  build: .
+  image: llm-test-harness:local
+  volumes:
+    - ./reports:/app/reports
+
+services:
+  tests:
+    <<: *harness
+    environment:
+      LLM_PROVIDER: mock
+
+  demo-regression:
+    <<: *harness
+    environment:
+      LLM_PROVIDER: mock
+      LLM_MOCK_RESPONSES: test_data/mock/responses.yaml,test_data/mock/faulty.yaml
+    command: ['npx', 'llm-harness', 'run']
+
+  evals-live:
+    <<: *harness
+    env_file: [.env] # LLM_PROVIDER=openai, LLM_API_KEY=... (never committed)
+    environment:
+      LLM_SOFT_FAIL: 'true'
+      LLM_GATE: 'true'
+      LLM_WORKERS: '2'
+    command: ['npm', 'run', 'test:llm']
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: [local]
+    ports: ['11434:11434']
+    volumes: [ollama:/root/.ollama]
+
+volumes:
+  ollama:
