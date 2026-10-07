@@ -1,0 +1,181 @@
+name: llm-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live:
+        description: 'Also run the suite against the real provider (needs the LLM_API_KEY secret)'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 3 * * 1-5' # nightly live evaluation on weekdays (drift detection)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  LLM_PROVIDER: mock # default: deterministic, free, no secrets
+
+jobs:
+  lint:
+    name: Lint, types & test-data validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: ESLint + Prettier
+        run: npm run lint
+      - name: TypeScript (strict, noEmit)
+        run: npm run typecheck
+      - name: Validate YAML test cases
+        run: npm run validate
+
+  unit:
+    name: Unit tests (Node ${{ matrix.node }})
+    needs: [lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Vitest + coverage gate (>= 85%)
+        run: npm run test:unit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-reports-node${{ matrix.node }}
+          path: |
+            reports/unit-junit.xml
+            coverage/cobertura-coverage.xml
+
+  llm-evals:
+    name: LLM evaluation suite (mock provider)
+    needs: [unit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Run LLM evaluations (Playwright Test)
+        run: npm run test:llm
+      - name: Quality gate (fails on regression / threshold breach)
+        if: always()
+        run: npx llm-harness gate reports/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llm-eval-reports
+          path: reports/
+          retention-days: 14
+
+  gate-self-test:
+    name: Quality gate rejects a regressed model
+    needs: [lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Faulty model must be rejected
+        env:
+          LLM_MOCK_RESPONSES: test_data/mock/responses.yaml,test_data/mock/faulty.yaml
+          GITHUB_STEP_SUMMARY: /dev/null # keep the job summary for the real run
+        run: |
+          if npx llm-harness run; then
+            echo "::error::Quality gate accepted a model with known regressions"
+            exit 1
+          fi
+          echo "Gate correctly rejected the faulty model"
+
+  docker:
+    name: Docker image builds and runs
+    needs: [lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: llm-test-harness:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Run suite in container (non-root)
+        run: docker run --rm llm-test-harness:ci
+
+  llm-evals-live:
+    name: LLM evaluation suite (live provider)
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.live)
+    needs: [llm-evals]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: llm-live # protect the secret with an environment + reviewers
+    env:
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+      LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.openai.com/v1' }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_SOFT_FAIL: 'true'
+      LLM_GATE: 'true'
+      LLM_WORKERS: '2'
+    steps:
+      - name: Skip when no API key is configured
+        id: key
+        run: |
+          if [ -z "$LLM_API_KEY" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::LLM_API_KEY secret not set - live evaluation skipped"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - if: steps.key.outputs.present == 'true'
+        run: npm ci
+      - name: Run LLM evaluations (soft-fail, gate decides)
+        if: steps.key.outputs.present == 'true'
+        run: npm run test:llm
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.key.outputs.present == 'true'
+        with:
+          name: llm-eval-reports-live
+          path: reports/
+          retention-days: 30
