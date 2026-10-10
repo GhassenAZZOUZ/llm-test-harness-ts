@@ -92,3 +92,189 @@ into a "flaky pass". Instead:
 - provider hiccups (429, 5xx, timeouts) are retried **below** the test by `RetryingClient`, and counted in the `retries` metric;
 - intrinsically noisy cases declare `runs` + `min_pass_ratio` in YAML, so the sampling variance is measured and reported, not retried away (see `HAL-007`).
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Data["Test data (declarative)"]
+        Y["test_data/cases/*.yaml"]
+        T["test_data/prompts/*.njk"]
+        S["test_data/schemas/*.json"]
+        M["test_data/mock/*.yaml"]
+    end
+
+    subgraph Exec["Execution"]
+        L["Loader + Zod schema"]
+        P["Playwright specs + fixtures / CLI"]
+        R["TestRunner"]
+    end
+
+    subgraph Providers["Provider layer"]
+        RC["RetryingClient<br/>backoff + jitter"]
+        OC["OpenAICompatibleClient<br/>fetch + AbortController"]
+        MC["MockLLMClient<br/>record / replay"]
+    end
+
+    subgraph Eval["Evaluation"]
+        F["EvaluatorFactory"]
+        D["Deterministic<br/>exact, contains, regex, JSON Schema, length"]
+        H["Heuristic<br/>relevance, groundedness, uncertainty, refusal"]
+        J["LLM-as-a-judge"]
+    end
+
+    subgraph Out["Metrics & reporting"]
+        RP["LLM reporter<br/>(Playwright main process)"]
+        MX["Metrics registry"]
+        G["Quality gate<br/>config/quality_gate.yaml"]
+        O["results.json, report.html, summary.md<br/>+ Playwright HTML + JUnit"]
+    end
+
+    Y --> L --> P --> R
+    T --> R
+    R --> RC --> OC & MC
+    M --> MC
+    R --> F --> D & H & J
+    S --> D
+    J --> RC
+    P -- "JSON attachment" --> RP --> MX --> G --> O
+    G -- "exit code" --> CI["GitHub Actions / GitLab CI / Jenkins"]
+```
+
+Sequence of a single test case:
+
+```mermaid
+sequenceDiagram
+    participant PW as Playwright worker (hallucination.spec.ts)
+    participant FX as evaluateCase fixture
+    participant R as TestRunner
+    participant C as RetryingClient → Provider
+    participant E as Evaluators
+    participant RP as LLM reporter (main process)
+    PW->>FX: evaluateCase(HAL-003)
+    FX->>R: run(case)
+    R->>R: render rag_qa.njk (throwOnUndefined)
+    loop runs (1..n)
+        R->>C: complete(messages, temperature, seed)
+        C-->>R: LLMResponse (text, latency, tokens, cost, attempts)
+        R->>E: evaluate(ctx) for each evaluator
+        E-->>R: { passed, score, reason, deterministic }
+    end
+    R-->>FX: TestResult (passed / failed / error / skipped)
+    FX->>FX: attach prompt, response, evaluators, llm-result.json
+    FX->>PW: strict → fail · soft → expected failure (regression always strict)
+    PW-->>RP: onTestEnd(attachments)
+    Note over RP: onEnd → metrics → quality gate → reports → exit code (LLM_GATE)
+```
+
+**Separation of concerns:**
+
+| Layer                       | Knows about                                  | Does not know about                                       |
+| --------------------------- | -------------------------------------------- | --------------------------------------------------------- |
+| `models/`                   | Zod schema, plain result types               | Everything else                                           |
+| `clients/`                  | HTTP, retries, pricing                       | Test cases, evaluators                                    |
+| `evaluators/`               | A response + its case                        | Providers (except the judge's injected client), reporting |
+| `runner/`                   | Abstractions injected in its constructor     | Playwright, YAML, reports                                 |
+| `metrics/`, `reporting/`    | `TestResult` lists                           | How results were produced                                 |
+| `runner/harness.ts`         | Wires everything together (composition root) | —                                                         |
+| `playwright/`, `tests/llm/` | Playwright wiring only; cases come from YAML | —                                                         |
+
+Results cross the worker → main-process boundary as **plain JSON** (a test attachment), which is
+why the result model is interfaces + pure functions rather than classes.
+
+## Test categories
+
+| Category                  | Cases | Examples                                                                                                                                                            | Expected behaviour                                                   |
+| ------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **functional**            | 6     | factual QA, arithmetic, summarization, sentiment classification, JSON extraction, judged explanation                                                                | Correct, well-formatted answers                                      |
+| **edge_case**             | 10    | empty prompt, ~50K-char needle-in-haystack, ambiguous, contradictory, truncated JSON, special chars, French, Arabic + emoji, repeated instructions, missing context | Graceful, sensible handling                                          |
+| **hallucination**         | 7     | fictional company/book, false premise (Einstein 1987), fake DOI, RAG answer absent vs present (control), future event ×3 runs                                       | **Acknowledge uncertainty** instead of inventing                     |
+| **instruction_following** | 7     | system vs user conflict (prompt leak), exact markdown format, ≤20 words, forbidden words, multi-step chain, raw JSON only, answer language                          | Instructions respected, with priority given to the system prompt     |
+| **safety**                | 7     | explosives, ransomware, doxxing, phishing, indirect prompt injection, **over-refusal** controls                                                                     | Refuse or redirect unsafe requests without over-refusing benign ones |
+| **regression**            | 4     | invented refund policy, JSON wrapped in prose, summary > 50 words, over-refusal on `docker kill`                                                                    | Previously fixed defects stay fixed                                  |
+
+One spec file per category under [`tests/llm/`](tests/llm/), each generated from YAML:
+
+```ts
+test.describe('hallucination', { tag: categoryTag('hallucination') }, () => {
+  for (const llmCase of casesFor('hallucination')) {
+    test(`${llmCase.id} ${llmCase.title}`, { tag: tagsFor(llmCase) }, async ({ evaluateCase }) => {
+      await evaluateCase(llmCase);
+    });
+  }
+});
+```
+
+> Safety cases store only the **request**. No harmful content is generated or asserted on;
+> the evaluator checks for a refusal or redirect, and also checks for over-refusal.
+
+## Evaluation strategy
+
+Every evaluator returns the same structure:
+
+```json
+{
+  "evaluator": "groundedness",
+  "passed": true,
+  "score": 0.92,
+  "reason": "11/12 sentences supported by context",
+  "deterministic": false,
+  "details": {}
+}
+```
+
+| Evaluator                        | YAML key                                   | Type          | Detects                                                 |
+| -------------------------------- | ------------------------------------------ | ------------- | ------------------------------------------------------- |
+| Exact match                      | `exact`                                    | deterministic | wrong value / extra text                                |
+| Contains / any / not             | `contains`, `contains_any`, `not_contains` | deterministic | missing facts, forbidden content, prompt-injection echo |
+| Regex / not regex                | `regex`, `not_regex`                       | deterministic | format violations, fabricated patterns (e.g. DOIs)      |
+| JSON Schema (Ajv, draft 2020-12) | `json_schema`                              | deterministic | invalid structured output                               |
+| Length                           | `length`                                   | deterministic | verbosity, instruction violations                       |
+| Semantic relevance               | `relevant_to`                              | heuristic     | off-topic answers                                       |
+| Groundedness                     | `grounded`                                 | heuristic     | claims or **numbers** not supported by the context      |
+| Uncertainty                      | `should_acknowledge_uncertainty`           | heuristic     | hallucinated facts about unknown or fictional entities  |
+| Refusal                          | `should_refuse: true/false`                | heuristic     | unsafe compliance **and** over-refusal                  |
+| LLM-as-a-judge                   | `judge: {rubric, threshold}`               | model-based   | qualities rules can't express (clarity, helpfulness)    |
+
+The factory builds them in a fixed order: deterministic first, heuristics next, the judge last.
+
+### Why deterministic assertions come first
+
+An LLM judge is another LLM, so it can be biased (towards longer or more confident answers, or towards its own style), it is non-deterministic, it costs money, and it can be prompt-injected by the answer it is grading. Rules of thumb used here:
+
+1. If a requirement can be expressed as a rule (format, keyword, schema, length, forbidden term), **use a rule**. It is free, instant and reproducible, and when it fails it says exactly why.
+2. Use heuristics (relevance, groundedness) as **cheap, explainable signals** with explicit thresholds.
+3. Use the judge **last**, for subjective criteria only, and always **combined with deterministic guards** (see `FUN-006`). The judge runs at temperature 0 with a strict JSON contract, and **fails closed** if its output can't be parsed or the call fails.
+4. The judge model can differ from the system under test (`LLM_JUDGE_MODEL`), which avoids a model grading its own output.
+
+## Metrics & quality gate
+
+Computed in [`src/metrics/collector.ts`](src/metrics/collector.ts). Each metric is a small function registered with `registerMetric()`, so adding one takes a few lines and it appears in every report automatically.
+
+| Metric                                            | Meaning                                                 |
+| ------------------------------------------------- | ------------------------------------------------------- |
+| `passRate`, `failureRate`, `errorRate`            | over executed (non-skipped) cases                       |
+| `avgScore`                                        | mean evaluator score                                    |
+| `latencyMs.{avg,p50,p95,max}`                     | per LLM call                                            |
+| `tokens.{prompt,completion,total}`, `costUsd`     | when the provider reports usage (`config/pricing.yaml`) |
+| `retries`, `llmCalls`                             | transient-failure visibility                            |
+| `hallucinationDetectionRate`                      | share of hallucination probes handled correctly         |
+| `regressionFailures`                              | regression cases not passing                            |
+| `deterministicPassRate` / `probabilisticPassRate` | the two kinds of verdict, reported separately           |
+| `byCategory`                                      | pass rate per category                                  |
+
+[`config/quality_gate.yaml`](config/quality_gate.yaml):
+
+```yaml
+min_pass_rate: 0.90
+max_regression_failures: 0
+min_hallucination_detection_rate: 0.80
+max_error_rate: 0.05
+max_p95_latency_ms: 15000
+max_total_cost_usd: 1.00
+```
+
+**Soft-fail vs gate.** Two separate decisions:
+
+- _Per test_ (`LLM_SOFT_FAIL`): strict by default (mock, PRs). With a live model, set it to `true` and probabilistic failures become Playwright **expected failures**: visible in every report, annotated `llm-soft-fail`, but not breaking the run on their own. **Regression cases always fail hard.**
+- _Per run_ (`LLM_GATE`): the reporter evaluates the gate after all tests and, when `LLM_GATE=true`, fails the run if any threshold is violated. CI can also run `npx llm-harness gate reports/results.json` as an explicit step.
+
