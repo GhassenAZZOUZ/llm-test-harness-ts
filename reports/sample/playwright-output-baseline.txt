@@ -1,0 +1,8 @@
+  ok 41 [llm-evals] › tests/llm/edge-cases.spec.ts:11:5 › edge_case › EDGE-006 Special characters are counted, not interpreted @edge_case @special-characters @major (8ms)
+
+  41 passed (9.2s)
+
+──────── LLM evaluation summary ────────
+executed 41 · passed 41 · failed 0 · errors 0 · skipped 0 · pass rate 100.0% · hallucination detection 100.0% · p95 802 ms
+Reports: reports/report.html | reports/results.json | reports/summary.md
+Quality gate: PASSED
