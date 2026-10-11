@@ -1,0 +1,323 @@
+# Project backlog used by scripts/bootstrap-github.ts to create GitHub labels,
+# milestones and issues. `implemented: true` items are closed automatically with a
+# link to the commit that references their key (commit trailer "Implements: LTH-XX").
+
+labels:
+  - { name: epic:foundation, color: '0e8a16', description: 'Project skeleton, schema, providers' }
+  - { name: epic:evaluation, color: '1d76db', description: 'Evaluators and runner' }
+  - {
+      name: epic:test-suites,
+      color: '5319e7',
+      description: 'YAML test suites and Playwright integration',
+    }
+  - { name: epic:reporting, color: 'fbca04', description: 'Metrics, reports, quality gate' }
+  - { name: epic:ci-cd, color: 'b60205', description: 'Pipelines, Docker, delivery' }
+  - { name: docs, color: 'c5def5', description: 'Documentation' }
+  - { name: enhancement, color: 'a2eeef', description: 'Improvement / future work' }
+  - {
+      name: qa-practice,
+      color: 'd4c5f9',
+      description: 'Test-architecture / QA engineering practice',
+    }
+
+milestones:
+  - { title: 'M1 - Foundation', description: 'Schema, provider abstraction, mock mode' }
+  - {
+      title: 'M2 - Evaluation engine',
+      description: 'Deterministic, heuristic and judge evaluators + runner',
+    }
+  - {
+      title: 'M3 - Test suites',
+      description: 'Playwright integration + functional, edge, hallucination, instruction, safety, regression suites',
+    }
+  - {
+      title: 'M4 - Metrics & reporting',
+      description: 'Metrics, custom Playwright reporter, JSON/HTML/Markdown reports, quality gate',
+    }
+  - {
+      title: 'M5 - CI/CD & docs',
+      description: 'GitHub Actions, GitLab CI, Jenkins, Docker, README',
+    }
+  - { title: 'Backlog', description: 'Future improvements' }
+
+issues:
+  - key: LTH-01
+    title: 'Project scaffolding & quality tooling (Node 20, TypeScript strict, ESM)'
+    milestone: 'M1 - Foundation'
+    labels: [epic:foundation, qa-practice]
+    implemented: true
+    body: |
+      Set up a maintainable TypeScript project.
+
+      **Acceptance criteria**
+      - [ ] `package.json` (ESM, Node >= 20.19, `llm-harness` bin run through tsx, no build step)
+      - [ ] `tsconfig.json` with `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`; `tsc --noEmit`
+      - [ ] ESLint (typescript-eslint type-checked + eslint-plugin-playwright) and Prettier
+      - [ ] npm scripts: `lint`, `typecheck`, `validate`, `test:unit`, `test:llm`, `test`, `demo:regression`, `report`
+      - [ ] `.env.example` documents every variable; `.env` and reports are git-ignored
+
+  - key: LTH-02
+    title: 'Zod test-case schema + YAML loader'
+    milestone: 'M1 - Foundation'
+    labels: [epic:foundation, qa-practice]
+    implemented: true
+    body: |
+      Test cases are data, not code. Define a strict schema and validate at collection time.
+
+      **Acceptance criteria**
+      - [ ] Zod schema: id pattern, category enum, prompt **xor** Nunjucks template, context, expectations, generation params, tags, severity, runs/min_pass_ratio, skip, defect
+      - [ ] Strict objects: unknown keys rejected so YAML typos fail fast; regexes compiled at load time
+      - [ ] Cross-field rules (grounded needs context, regression needs defect, at least one assertion)
+      - [ ] YAML contract (snake_case, shared with the Python version) mapped to a camelCase domain model
+      - [ ] Loader reports file + case id on error, rejects duplicate ids, filters by category/tag
+      - [ ] `llm-harness validate` command
+
+  - key: LTH-03
+    title: 'LLM provider abstraction + OpenAI-compatible fetch client'
+    milestone: 'M1 - Foundation'
+    labels: [epic:foundation]
+    implemented: true
+    body: |
+      Keep the provider behind an interface so a new provider is one class + one factory line.
+
+      **Acceptance criteria**
+      - [ ] `LLMClient` interface returning a normalised `LLMResponse` (text, latency, tokens, cost, attempts)
+      - [ ] Native `fetch` `/chat/completions` client (OpenAI, Ollama, vLLM, LiteLLM...) with an `AbortController` timeout
+      - [ ] Error classification: 408/409/429/5xx/timeouts/network -> `TransientLLMError`; other 4xx/bad payload -> `PermanentLLMError`
+      - [ ] Cost from `config/pricing.yaml`; API key wrapped in `Secret`, redacted from logs and error messages
+      - [ ] Unit tests with an injected fetch (no network)
+
+  - key: LTH-04
+    title: 'Retry transient provider failures (exponential backoff + jitter)'
+    milestone: 'M1 - Foundation'
+    labels: [epic:foundation, qa-practice]
+    implemented: true
+    body: |
+      **Acceptance criteria**
+      - [ ] `RetryingClient` decorator usable with any provider (incl. mock)
+      - [ ] Only transient errors retried; permanent errors fail fast
+      - [ ] Attempts recorded on the response and surfaced as the `retries` metric
+      - [ ] Sleep and randomness injectable for deterministic tests
+
+  - key: LTH-05
+    title: 'Mock provider (record/replay) - run the suite without an API key'
+    milestone: 'M1 - Foundation'
+    labels: [epic:foundation, qa-practice]
+    implemented: true
+    body: |
+      `npm run test:llm` must work offline, for free, deterministically.
+
+      **Acceptance criteria**
+      - [ ] Responses keyed by test id in YAML; list responses cycle across repeated runs
+      - [ ] Simulated transient/permanent errors (`fail_times`, `error`) and latency
+      - [ ] Layered overlays (`LLM_MOCK_RESPONSES=a.yaml,b.yaml`) incl. a `faulty.yaml` regressed-model scenario
+      - [ ] Safe fallbacks for unknown prompts; judge requests return JSON verdicts
+
+  - key: LTH-06
+    title: 'Deterministic evaluators'
+    milestone: 'M2 - Evaluation engine'
+    labels: [epic:evaluation]
+    implemented: true
+    body: |
+      Every evaluator returns `{ evaluator, passed, score, reason, deterministic, details }`.
+
+      **Acceptance criteria**
+      - [ ] Exact match (whitespace/trailing period tolerant, optional case sensitivity)
+      - [ ] Contains all / contains any / not contains (partial score)
+      - [ ] Regex / not regex (Python `\A`, `\Z`, `(?i)` translated so YAML is shared as-is)
+      - [ ] JSON Schema with Ajv draft 2020-12 (tolerates ```json fences, partial credit on violations)
+      - [ ] Length (chars/words min/max)
+
+  - key: LTH-07
+    title: 'Heuristic evaluators: relevance, groundedness, uncertainty, refusal'
+    milestone: 'M2 - Evaluation engine'
+    labels: [epic:evaluation]
+    implemented: true
+    body: |
+      **Acceptance criteria**
+      - [ ] Semantic relevance with a pluggable `Embedder` (default: bag-of-words cosine)
+      - [ ] Groundedness: sentence support vs context + invented-number detection (numbers from the question allowed)
+      - [ ] Uncertainty acknowledgement (hallucination guard)
+      - [ ] Refusal evaluator covering both refusal and over-refusal
+      - [ ] Flagged `deterministic: false` in reports
+
+  - key: LTH-08
+    title: 'LLM-as-a-judge evaluator'
+    milestone: 'M2 - Evaluation engine'
+    labels: [epic:evaluation]
+    implemented: true
+    body: |
+      **Acceptance criteria**
+      - [ ] Rubric + threshold per case; judge model configurable independently (`LLM_JUDGE_*`)
+      - [ ] Temperature 0, fixed seed, strict JSON output contract
+      - [ ] Unparseable output or judge error => FAIL (fail closed)
+      - [ ] README explains why deterministic assertions are preferred
+
+  - key: LTH-09
+    title: 'Test runner: repeated runs, pass ratio, error vs failure'
+    milestone: 'M2 - Evaluation engine'
+    labels: [epic:evaluation, qa-practice]
+    implemented: true
+    body: |
+      **Acceptance criteria**
+      - [ ] Render prompt, call client, run evaluators, aggregate verdict `passed | failed | error | skipped`
+      - [ ] `runs` + `min_pass_ratio` to smooth non-determinism
+      - [ ] Provider problems are `error` (infra), not `failed` (model defect)
+      - [ ] Setup errors (missing template variable) reported, not crashing the run
+      - [ ] Runner has no dependency on Playwright, YAML or reporting (DI); shared by Playwright and the CLI
+
+  - key: LTH-10
+    title: 'Functional & edge-case suites'
+    milestone: 'M3 - Test suites'
+    labels: [epic:test-suites]
+    implemented: true
+    body: |
+      - Functional: factual, arithmetic, summarization (relevance + groundedness), classification, JSON extraction, judged explanation
+      - Edge: empty, ~50K-char needle-in-haystack (Nunjucks template), ambiguous, contradictory, malformed JSON, special chars, multilingual (FR, AR+emoji), repeated instructions, missing context
+
+  - key: LTH-11
+    title: 'Hallucination & instruction-following suites'
+    milestone: 'M3 - Test suites'
+    labels: [epic:test-suites]
+    implemented: true
+    body: |
+      - Hallucination: fictional company/book, false premise, fabricated DOI, RAG answer absent vs present (control), repeated-run future event
+      - Instruction following: system vs user conflict (prompt leak), markdown format, max length, forbidden words, multi-step, raw JSON only, response language
+
+  - key: LTH-12
+    title: 'Safety & regression suites + `promote` command'
+    milestone: 'M3 - Test suites'
+    labels: [epic:test-suites, qa-practice]
+    implemented: true
+    body: |
+      - Safety (requests only, no harmful content generated): explosives, malware, doxxing, phishing, indirect prompt injection, over-refusal controls
+      - Regression: each case references a defect; always strict even in soft-fail mode
+      - `npx llm-harness promote <ID> --defect <REF>` appends a REG-00N case, re-validates and rolls back on error
+
+  - key: LTH-13
+    title: 'Metrics collector'
+    milestone: 'M4 - Metrics & reporting'
+    labels: [epic:reporting]
+    implemented: true
+    body: |
+      Pass/failure/error rate, avg score, latency avg/p50/p95/max, tokens, cost, retries, hallucination detection rate, regression failures, deterministic vs probabilistic pass rate, per-category breakdown. New metrics via `registerMetric()`.
+
+  - key: LTH-14
+    title: 'Custom Playwright reporter + JSON/HTML/Markdown reports'
+    milestone: 'M4 - Metrics & reporting'
+    labels: [epic:reporting]
+    implemented: true
+    body: |
+      `src/reporting/llm-reporter.ts` collects the per-test results (JSON attachment), computes metrics and writes `reports/results.json`, a self-contained filterable dark-mode-friendly `report.html` (all model output HTML-escaped) and `summary.md` (appended to `$GITHUB_STEP_SUMMARY`). Playwright's HTML and JUnit reporters stay enabled (annotations embedded as JUnit properties).
+
+  - key: LTH-15
+    title: 'Quality gate + CLI'
+    milestone: 'M4 - Metrics & reporting'
+    labels: [epic:reporting, qa-practice]
+    implemented: true
+    body: |
+      Thresholds in `config/quality_gate.yaml` (pass rate, regression failures, hallucination rate, error rate, p95 latency, cost). `LLM_GATE=true` makes the reporter fail the Playwright run. CLI: `validate`, `run [-c] [-t]`, `gate`, `promote`.
+
+  - key: LTH-16
+    title: 'GitHub Actions pipeline'
+    milestone: 'M5 - CI/CD & docs'
+    labels: [epic:ci-cd]
+    implemented: true
+    body: |
+      lint/typecheck/validate -> unit (Node 20 + 22, coverage >= 85%) -> LLM evals (mock) + quality gate -> artifacts. Gate self-test with the faulty model. Docker build job. Nightly/manual live run using the `LLM_API_KEY` secret behind the protected `llm-live` environment, skipped cleanly without a key.
+
+  - key: LTH-17
+    title: 'Dockerfile + docker-compose'
+    milestone: 'M5 - CI/CD & docs'
+    labels: [epic:ci-cd]
+    implemented: true
+    body: |
+      Multi-stage, non-root Node 20 image (no browsers needed); compose services for the mock suite, regression demo, live evals (.env) and optional local Ollama.
+
+  - key: LTH-18
+    title: 'README & documentation'
+    milestone: 'M5 - CI/CD & docs'
+    labels: [docs]
+    implemented: true
+    body: |
+      What/why, LLM vs API testing, Mermaid architecture + sequence diagram, categories, evaluation strategy, metrics, quick start, provider config (incl. Ollama), reports, CI for GitHub/GitLab/Jenkins, limitations, roadmap, design decisions, "Why Playwright Test as an LLM eval runner". Sample reports under `reports/sample/`.
+
+  # ---------------------------------------------------------------- backlog
+  - key: LTH-19
+    title: 'Rate-limited parallel execution against live providers'
+    milestone: 'Backlog'
+    labels: [enhancement]
+    implemented: false
+    body: |
+      Playwright workers already parallelise cases, but nothing coordinates provider RPM/TPM limits across workers. Add a shared token-bucket limiter (or honour `Retry-After`), and track wall-clock time of a full run as a metric.
+
+  - key: LTH-20
+    title: 'Embedding-based semantic similarity'
+    milestone: 'Backlog'
+    labels: [enhancement]
+    implemented: false
+    body: |
+      Implement an `Embedder` backed by an embeddings endpoint and calibrate thresholds per case type. Keep bag-of-words as the offline default.
+
+  - key: LTH-21
+    title: 'Record real responses as cassettes for the mock provider'
+    milestone: 'Backlog'
+    labels: [enhancement, qa-practice]
+    implemented: false
+    body: |
+      `llm-harness record` runs against a real provider and writes `test_data/mock/recorded-<model>.yaml`, so offline runs replay real model behaviour.
+
+  - key: LTH-22
+    title: 'Native Anthropic / Azure OpenAI providers'
+    milestone: 'Backlog'
+    labels: [enhancement]
+    implemented: false
+    body: |
+      Add providers behind `LLMClient`; contract tests shared across providers.
+
+  - key: LTH-23
+    title: 'Historical trend dashboard (Grafana / Allure history)'
+    milestone: 'Backlog'
+    labels: [enhancement]
+    implemented: false
+    body: |
+      Push run metrics (pass rate, p95 latency, cost, hallucination rate per model) to Prometheus Pushgateway or a SQLite store and chart drift over time.
+
+  - key: LTH-24
+    title: 'Calibrate the LLM judge against human labels'
+    milestone: 'Backlog'
+    labels: [enhancement, qa-practice]
+    implemented: false
+    body: |
+      Maintain a small human-labelled set; measure judge agreement (accuracy / Cohen's kappa) and fail CI if the judge drifts below a threshold.
+
+  # ---------------------------------------------------------------- TS port additions
+  - key: LTH-25
+    title: 'GitLab CI pipeline'
+    milestone: 'M5 - CI/CD & docs'
+    labels: [epic:ci-cd]
+    implemented: true
+    body: |
+      `.gitlab-ci.yml` mirroring the GitHub stages: lint -> unit (Node 20/22 matrix, JUnit + Cobertura reports) -> gate self-test -> LLM evals (JUnit + report artifacts) -> Docker (dind) -> live job in the `llm-live` environment, skipped by a rule when `LLM_API_KEY` is not set.
+
+  - key: LTH-26
+    title: 'Jenkins declarative pipeline'
+    milestone: 'M5 - CI/CD & docs'
+    labels: [epic:ci-cd]
+    implemented: true
+    body: |
+      `Jenkinsfile` (declarative, `node:20` docker agent): lint/typecheck/validate, unit tests (`junit`), LLM evals + gate self-test in parallel (`junit`, `publishHTML` for the LLM and Playwright reports), nightly cron / `LIVE` parameter with `withCredentials` for the API key.
+
+  - key: LTH-27
+    title: 'Playwright Test integration: fixtures, tags, soft-fail'
+    milestone: 'M3 - Test suites'
+    labels: [epic:test-suites, qa-practice]
+    implemented: true
+    body: |
+      **Acceptance criteria**
+      - [ ] One spec per category under `tests/llm/`, generated from YAML with `test.describe` + a loop
+      - [ ] Category, YAML tags and severity as Playwright tags (`--grep @hallucination`, `@smoke`, `@critical`)
+      - [ ] Worker-scoped `harness` fixture (DI) and option fixture `softFail`; test-scoped `evaluateCase`
+      - [ ] Prompt, response, evaluator table and JSON result attached with `testInfo.attach`
+      - [ ] `LLM_SOFT_FAIL=true`: probabilistic failures become expected failures (`testInfo.fail()`), regression cases always fail hard
+      - [ ] Playwright `retries: 0` for LLM evals (rationale in README)
